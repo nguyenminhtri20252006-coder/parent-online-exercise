@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // File: src/components/ResultView.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { UserData, ExamResult } from "@/types";
 
@@ -24,38 +24,35 @@ export default function ResultView({
   const [ranking, setRanking] = useState<RankingItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Ref để chặn gọi API submit 2 lần (QUAN TRỌNG)
+  const hasSubmittedRef = useRef(false);
+
   useEffect(() => {
     const submitAndFetch = async () => {
       try {
-        await fetch("/api/submit-result", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...userData,
-            score: result.score,
-            duration: result.duration,
-          }),
-        });
+        // 1. Submit kết quả (Chỉ gọi nếu chưa submit)
+        if (!hasSubmittedRef.current) {
+          hasSubmittedRef.current = true; // Đánh dấu đã submit ngay lập tức
 
-        const { data } = await supabase
-          .from("exam_results")
-          .select("name, score, duration, phone")
-          .order("score", { ascending: false })
-          .order("duration", { ascending: true })
-          .limit(50);
-
-        if (data) {
-          const uniqueMap = new Map();
-          data.forEach((item: any) => {
-            if (!uniqueMap.has(item.phone)) {
-              uniqueMap.set(item.phone, item);
-            }
+          await fetch("/api/submit-result", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...userData,
+              score: result.score,
+              duration: result.duration,
+            }),
           });
-          const top10Unique = Array.from(uniqueMap.values()).slice(
-            0,
-            10,
-          ) as RankingItem[];
-          setRanking(top10Unique);
+        }
+
+        // 2. Lấy BXH thông qua RPC (Hàm SQL đã tối ưu lọc trùng ở Server)
+        const { data, error } = await supabase.rpc("get_leaderboard"); // Gọi hàm get_leaderboard
+
+        if (error) {
+          console.error("Lỗi lấy BXH:", error);
+        } else if (data) {
+          // Data trả về từ RPC đã là Top 10 unique, không cần xử lý Map nữa
+          setRanking(data as RankingItem[]);
         }
       } catch (error) {
         console.error("Lỗi quy trình kết quả", error);
@@ -109,12 +106,11 @@ export default function ResultView({
 
         {loading ? (
           <div className="flex-1 overflow-hidden space-y-3 px-1">
-            {/* Hiệu ứng Skeleton Loading cho Bảng xếp hạng */}
             {[...Array(6)].map((_, i) => (
               <div
                 key={i}
                 className="flex items-center justify-between p-2 md:p-3 rounded-xl bg-white/40 border border-yellow-100 animate-pulse"
-                style={{ animationDelay: `${i * 100}ms` }} // Hiệu ứng xuất hiện lần lượt
+                style={{ animationDelay: `${i * 100}ms` }}
               >
                 <div className="flex items-center gap-3 w-full">
                   <div className="w-6 h-6 md:w-8 md:h-8 bg-yellow-200/60 rounded-full shrink-0"></div>
@@ -143,18 +139,14 @@ export default function ResultView({
                 let rowClass =
                   "flex justify-between items-center p-2 md:p-3 rounded-xl transition-all ";
                 if (isCurrentUser) {
-                  // User hiện tại: Màu xanh nổi bật trên nền vàng
                   rowClass +=
                     "bg-blue-50 border-2 border-blue-500 shadow-md transform scale-[1.01] z-10 relative";
                 } else if (idx === 0) {
-                  // Top 1: Vàng đậm hơn
                   rowClass +=
                     "bg-yellow-200 border border-yellow-400 shadow-sm";
                 } else if (idx < 3) {
-                  // Top 2-3
                   rowClass += "bg-yellow-100/80 border border-yellow-200";
                 } else {
-                  // Các hạng khác: Trắng hoặc vàng rất nhạt
                   rowClass +=
                     "bg-white/60 hover:bg-white/80 border border-transparent";
                 }
