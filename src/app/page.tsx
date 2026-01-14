@@ -3,21 +3,19 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-// import LandingView from '@/components/LandingView'; // Đã xóa LandingView
 import RegisterForm from "@/components/RegisterForm";
+import GuideView from "@/components/GuideView";
 import QuizView from "@/components/QuizView";
 import ResultView from "@/components/ResultView";
 import FeedbackView from "@/components/FeedbackView";
-import { UserData } from "@/types";
+import { UserData, Question } from "@/types";
 
-// Loại bỏ 'landing' khỏi danh sách trạng thái
-type ViewState = "register" | "quiz" | "result" | "feedback";
+type ViewState = "register" | "guide" | "quiz" | "result" | "feedback";
 
 const FACEBOOK_URL = "https://www.facebook.com/lhub304";
 const STORAGE_KEY = "parent_online_session";
 
 export default function Home() {
-  // Đặt mặc định là 'register' thay vì 'landing'
   const [view, setView] = useState<ViewState>("register");
   const [userData, setUserData] = useState<UserData | null>(null);
   const [result, setResult] = useState<{
@@ -26,18 +24,21 @@ export default function Home() {
   } | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
 
-  // 1. Khôi phục trạng thái khi F5
+  // State lưu câu hỏi đã tải trước
+  const [prefetchedQuestions, setPrefetchedQuestions] = useState<Question[]>(
+    [],
+  );
+
+  // 1. Khôi phục trạng thái phiên làm việc cũ
   useEffect(() => {
     const restoreSession = () => {
       const savedSession = localStorage.getItem(STORAGE_KEY);
       if (savedSession) {
         try {
           const session = JSON.parse(savedSession);
-          // Chỉ khôi phục nếu session hợp lệ và có userData
           if (session && session.userData) {
             setUserData(session.userData);
             if (session.result) setResult(session.result);
-            // Nếu session cũ đang ở landing (từ bản cũ), ép về register
             if (session.view && session.view !== "landing") {
               setView(session.view);
             }
@@ -49,11 +50,31 @@ export default function Home() {
       }
       setIsRestoring(false);
     };
-
     restoreSession();
   }, []);
 
-  // Hàm helper để lưu session
+  // 2. Tải trước câu hỏi NGAY KHI VÀO TRANG (Background Fetch)
+  useEffect(() => {
+    const prefetchData = async () => {
+      // Nếu đã có dữ liệu rồi thì thôi không tải lại (tránh spam request khi re-render)
+      if (prefetchedQuestions.length > 0) return;
+
+      try {
+        console.log("🚀 Bắt đầu tải câu hỏi ngầm ngay khi vào trang...");
+        const res = await fetch("/api/questions");
+        const json = await res.json();
+        if (json.status === "success") {
+          setPrefetchedQuestions(json.data);
+          console.log("✅ Đã tải xong câu hỏi ngầm!");
+        }
+      } catch (e) {
+        console.error("❌ Lỗi prefetch:", e);
+      }
+    };
+
+    prefetchData();
+  }, []); // Chỉ chạy 1 lần khi component mount
+
   const updateSession = (updates: any) => {
     try {
       const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
@@ -64,13 +85,17 @@ export default function Home() {
     }
   };
 
-  // Xóa hàm handleStart vì không còn dùng LandingPage
-
   const handleRegisterSubmit = (data: UserData) => {
     setUserData(data);
+    setView("guide");
+    updateSession({ userData: data, view: "guide" });
+
+    // Không cần gọi prefetch ở đây nữa vì đã gọi ngay từ đầu
+  };
+
+  const handleGuideFinish = () => {
     setView("quiz");
-    // Bắt đầu session mới
-    updateSession({ userData: data, view: "quiz", startTime: Date.now() });
+    updateSession({ view: "quiz", startTime: Date.now() });
   };
 
   const handleQuizFinish = (score: number, duration: number) => {
@@ -82,8 +107,12 @@ export default function Home() {
 
   const handleRetest = () => {
     setResult(null);
+    // Khi làm lại, có thể muốn lấy bộ đề mới.
+    // Reset state prefetch để QuizView tự fetch lại hoặc giữ nguyên nếu muốn đề cũ.
+    // Ở đây ta clear để QuizView tự xử lý logic fetch mới nếu cần.
+    setPrefetchedQuestions([]);
+
     setView("quiz");
-    // Reset phần quiz trong session nhưng giữ userData
     updateSession({ view: "quiz", result: null, quizState: null });
   };
 
@@ -93,7 +122,6 @@ export default function Home() {
   };
 
   const handleRedirectFacebook = () => {
-    // Xóa session khi hoàn thành hẳn
     localStorage.removeItem(STORAGE_KEY);
     window.location.href = FACEBOOK_URL;
   };
@@ -102,15 +130,16 @@ export default function Home() {
 
   return (
     <main className="min-h-screen font-[family-name:var(--font-inter)]">
-      {/* Đã xóa LandingView, vào thẳng RegisterForm */}
-
       {view === "register" && <RegisterForm onSubmit={handleRegisterSubmit} />}
+
+      {view === "guide" && <GuideView onStart={handleGuideFinish} />}
 
       {view === "quiz" && userData && (
         <QuizView
           key="quiz-view"
           userData={userData}
           onFinish={handleQuizFinish}
+          prefetchedQuestions={prefetchedQuestions} // Truyền dữ liệu đã tải xuống
         />
       )}
 

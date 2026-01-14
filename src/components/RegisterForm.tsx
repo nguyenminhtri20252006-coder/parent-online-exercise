@@ -134,7 +134,7 @@ export default function RegisterForm({ onSubmit }: Props) {
                 setFormData({ ...formData, email: e.target.value })
               }
               className={inputClass}
-              placeholder="username (Tự thêm @gmail.com)"
+              placeholder="username (@gmail.com)"
               disabled={isSubmitting}
             />
             <div className="flex gap-2 items-start mt-2 px-1 bg-blue-50 p-2 md:p-3 rounded-lg border border-blue-100">

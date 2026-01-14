@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// File: src/components/QuizView.tsx
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Question, UserData } from "@/types";
 import { Volume2 } from "lucide-react";
@@ -6,12 +7,17 @@ import { Volume2 } from "lucide-react";
 interface Props {
   userData: UserData;
   onFinish: (score: number, duration: number) => void;
+  prefetchedQuestions?: Question[];
 }
 
 const STORAGE_KEY = "parent_online_session";
 
-export default function QuizView({ userData, onFinish }: Props) {
-  // 1. State & Refs (Giữ nguyên logic cũ)
+export default function QuizView({
+  userData,
+  onFinish,
+  prefetchedQuestions,
+}: Props) {
+  // 1. State & Refs
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -25,7 +31,7 @@ export default function QuizView({ userData, onFinish }: Props) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fetchedRef = useRef(false);
 
-  // 2. Helper Functions (Giữ nguyên logic cũ)
+  // 2. Helper Functions
   const saveProgress = useCallback(
     (newState: any) => {
       const currentSession = JSON.parse(
@@ -51,15 +57,16 @@ export default function QuizView({ userData, onFinish }: Props) {
     [questions, currentIndex, correctCount, timer],
   );
 
-  const stopTimer = () => {
+  const stopTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
-  };
+  }, []);
 
-  const startTimer = () => {
-    stopTimer();
+  const startTimer = useCallback(() => {
+    stopTimer(); // Clear timer cũ nếu có để tránh trùng lặp
     timerRef.current = setInterval(() => {
       setTimer((prev) => {
         const newTime = prev + 1;
+        // Lưu timer mỗi 5 giây
         if (newTime % 5 === 0) {
           const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
           if (s.quizState) {
@@ -70,7 +77,7 @@ export default function QuizView({ userData, onFinish }: Props) {
         return newTime;
       });
     }, 1000);
-  };
+  }, [stopTimer]);
 
   const playAudio = (url: string) => {
     if (!url) return;
@@ -128,11 +135,24 @@ export default function QuizView({ userData, onFinish }: Props) {
     return `${min}:${sec}`;
   };
 
-  // 3. Effects (Giữ nguyên logic cũ)
+  // 3. Effects
+
+  // Effect quản lý Timer riêng biệt: Tự động chạy khi hết Loading
+  useEffect(() => {
+    if (!loading) {
+      startTimer();
+    }
+    return () => stopTimer();
+  }, [loading, startTimer, stopTimer]);
+
+  // Effect khởi tạo dữ liệu
   useEffect(() => {
     if (fetchedRef.current) return;
+
     const initQuiz = async () => {
       fetchedRef.current = true;
+
+      // A. Khôi phục từ LocalStorage
       const savedSession = JSON.parse(
         localStorage.getItem(STORAGE_KEY) || "{}",
       );
@@ -146,9 +166,24 @@ export default function QuizView({ userData, onFinish }: Props) {
         setCorrectCount(qs.correctCount || 0);
         setTimer(qs.timer || 0);
         setLoading(false);
-        startTimer();
+        // Không gọi startTimer() ở đây nữa, để useEffect ở trên tự lo
         return;
       }
+
+      // B. Sử dụng dữ liệu đã Prefetch
+      if (prefetchedQuestions && prefetchedQuestions.length > 0) {
+        setQuestions(prefetchedQuestions);
+        setLoading(false);
+        saveProgress({
+          questions: prefetchedQuestions,
+          currentIndex: 0,
+          correctCount: 0,
+          timer: 0,
+        });
+        return;
+      }
+
+      // C. Fetch trực tiếp (Fallback)
       try {
         const res = await fetch("/api/questions");
         const json = await res.json();
@@ -156,7 +191,6 @@ export default function QuizView({ userData, onFinish }: Props) {
           const newQuestions = json.data;
           setQuestions(newQuestions);
           setLoading(false);
-          startTimer();
           saveProgress({
             questions: newQuestions,
             currentIndex: 0,
@@ -171,9 +205,10 @@ export default function QuizView({ userData, onFinish }: Props) {
         alert("Không thể kết nối đến máy chủ.");
       }
     };
+
     initQuiz();
-    return () => stopTimer();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Chỉ chạy 1 lần khi mount
 
   useEffect(() => {
     if (!loading && questions.length > 0 && questions[currentIndex]) {
